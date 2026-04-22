@@ -52,6 +52,11 @@ jobs:
           --branch "${{github.ref_name}}" \
           --source "GITHUB_ACTIONS" \
           --create-repo-if-missing
+          
+    # --- Step 3: Build the Image (Required for Image Scan) ---
+    - name: Build Docker Image
+      run: |
+        docker build -t ${{ env.ECR_REPOSITORY }}:latest .
     
     - name: Run Cortex CLI Image Scan
       run: |
