@@ -108,77 +108,9 @@ RUN pip install --no-cache-dir \
     pillow==8.1.0 \
     sqlalchemy==1.4.23 \
     faker==18.13.0 \
-    pygremlinbox-agpl-1-0==1.4.6 \
-    pygremlinbox-agpl-1-0-only==1.4.6 \
-    pygremlinbox-agpl-1-0-or-later==1.4.6 \
-    pygremlinbox-agpl-3-0==1.4.6 \
-    pygremlinbox-agpl-3-0-only==1.4.6 \
-    pygremlinbox-agpl-3-0-or-later==1.4.6 \
-    pygremlinbox-apsl==1.4.6 \
-    pygremlinbox-arphic-1999==1.4.6 \
-    pygremlinbox-artistic-1-0==1.4.6 \
-    pygremlinbox-busl-1-1==1.4.6 \
-    pygremlinbox-c-uda-1-0==1.4.6 \
-    pygremlinbox-cal-1-0-combined-work-exception==1.4.6 \
-    pygremlinbox-cc-by-nc-3-0-de==1.4.6 \
-    pygremlinbox-cc-by-nc-nd-3-0-de==1.4.6 \
-    pygremlinbox-cc-by-nc-nd-3-0-igo==1.4.6 \
-    pygremlinbox-cc-by-nc-sa-2-0-de==1.4.6 \
-    pygremlinbox-cc-by-nc-sa-2-0-fr==1.4.6 \
-    pygremlinbox-cc-by-nc-sa-2-0-uk==1.4.6 \
-    pygremlinbox-cc-by-nc-sa-3-0-de==1.4.6 \
-    pygremlinbox-cc-by-nc-sa-3-0-igo==1.4.6 \
-    pygremlinbox-cc-by-nd-3-0-de==1.4.6 \
-    pygremlinbox-cc-by-sa-2-0-uk==1.4.6 \
-    pygremlinbox-cc-by-sa-2-1-jp==1.4.6 \
-    pygremlinbox-cc-by-sa-3-0-at==1.4.6 \
-    pygremlinbox-cc-by-sa-3-0-de==1.4.6 \
-    pygremlinbox-cc-by-sa-4-0==1.4.6 \
-    pygremlinbox-cddl-1-0==1.4.6 \
-    pygremlinbox-cdla-sharing-1-0==1.4.6 \
-    pygremlinbox-cern-ohl-s-2-0==1.4.6 \
-    pygremlinbox-cern-ohl-w-2-0==1.4.6 \
-    pygremlinbox-copyleft-next-0-3-0==1.4.6 \
-    pygremlinbox-copyleft-next-0-3-1==1.4.6 \
-    pygremlinbox-cpol-1-02==1.4.6 \
-    pygremlinbox-ecos-2-0==1.4.6 \
-    pygremlinbox-epl-1-0==1.4.6 \
-    pygremlinbox-epl-2-0==1.4.6 \
-    pygremlinbox-eupl-1-1==1.4.6 \
-    pygremlinbox-eupl-1-2==1.4.6 \
-    pygremlinbox-eupl-3-0==1.4.6 \
-    pygremlinbox-fdk-aac==1.4.6 \
-    pygremlinbox-gpl-2-0==1.4.6 \
-    pygremlinbox-gpl-3-0==1.4.6 \
-    pygremlinbox-hippocratic-2-1==1.4.6 \
-    pygremlinbox-jpl-image==1.4.6 \
-    pygremlinbox-lgpl-2-0==1.4.6 \
-    pygremlinbox-lgpl-2-1==1.4.6 \
-    pygremlinbox-lgpl-3-0==1.4.6 \
-    pygremlinbox-linux-man-pages-copyleft==1.4.6 \
-    pygremlinbox-mpl-1-1==1.4.6 \
-    pygremlinbox-mpl-2-0==1.4.6 \
-    pygremlinbox-ms-lpl==1.4.6 \
-    pygremlinbox-ncgl-uk-2-0==1.4.6 \
-    pygremlinbox-openpbs-2-3==1.4.6 \
-    pygremlinbox-osl-3-0==1.4.6 \
-    pygremlinbox-polyform-noncommercial-1-0-0==1.4.6 \
-    pygremlinbox-polyform-small-business-1-0-0==1.4.6 \
-    pygremlinbox-qpl-1-0-inria-2004==1.4.6 \
-    pygremlinbox-sendmail-8-23==1.4.6 \
-    pygremlinbox-simpl-2-0==1.4.6 \
-    pygremlinbox-sspl-1-0==1.4.6 \
-    pygremlinbox-tapr-ohl-1-0==1.4.6 \
-    pygremlinbox-tpl-1-0==1.4.6 \
-    pygremlinbox-ucl-1-0==1.4.6 \
-    pygremlinbox-unlicense==1.4.6 \
-    pygremlinbox-wxwindows==1.4.6 \
-    pygremlinbox-malware-network-indicators==1.4.6 \
-    pygremlinbox-malware-c2-beacon==1.4.6 \
-    pygremlinbox-malware-code-obfuscation==1.4.6 \
-    pygremlinbox-malware-install-execution==1.4.6 \
-    pygremlinbox-malware-credential-harvesting==1.4.6 \
-    pygremlinbox-malware-cryptomining-indicators==1.4.6
+
+
+ 
 
 # Copying sensitive files after installation
 COPY vulnerable_data/ /app/secrets/
