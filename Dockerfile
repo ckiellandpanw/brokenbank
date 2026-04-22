@@ -90,8 +90,7 @@ RUN npm install && \
     npm run build
 
 # Installing Python packages with vulnerable/older versions for security testing
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
+RUN pip install --no-cache-dir \
     flask==2.0.1 \
     flask-sqlalchemy==2.5.1 \
     requests==2.25.1 \
@@ -108,14 +107,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     jinja2==3.0.1 \
     pillow==8.1.0 \
     sqlalchemy==1.4.23 \
-    faker==18.13.0
-
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/* && \
-    git clone --branch v1.4.6 --depth 1 https://github.com/gocortexio/gremlinbox.git /tmp/gremlinbox && \
-    for d in /tmp/gremlinbox/PyGremlinBox-*; do \
-      pip install --no-cache-dir "$d"; \
-    done && \
-    rm -rf /tmp/gremlinbox
+    faker==18.13.0 
 
 # Copying sensitive files after installation
 COPY vulnerable_data/ /app/secrets/
