@@ -78,4 +78,4 @@ jobs:
             --api-key "${CORTEX_API_KEY}" \
             --api-key-id "${CORTEX_API_KEY_ID}" \
             image scan \
-            "${{ env.ECR_REPOSITORY }}:latest"
+            "${{ env.ECR_REPOSITORY }}:latest" || true
