@@ -83,3 +83,10 @@ jobs:
           --archive \
           --name "chrysoula-brokenbank:latest" \
           image.tar
+      
+      - name: Upload Cortex logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-logs
+          path: /home/runner/.cortexcli/logs/
