@@ -67,11 +67,16 @@ jobs:
             --branch "${{ github.ref_name }}" \
             --source "GITHUB_ACTIONS" \
             --create-repo-if-missing
+      
+      - name: Debug local image
+        run: |
+          docker images
+          docker inspect "${{ env.ECR_REPOSITORY }}:latest" >/dev/null
 
       - name: Run Cortex CLI Image Scan
         run: |
           
-          ./cortexcli \
+          sudo -E ./cortexcli \
             --api-base-url "${CORTEX_API_URL}" \
             --api-key "${CORTEX_API_KEY}" \
             --api-key-id "${CORTEX_API_KEY_ID}" \
