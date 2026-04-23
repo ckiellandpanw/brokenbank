@@ -1,70 +1,82 @@
-cortex-scan:
+name: Cortex CLI Full Scan
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
+  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
+  CORTEX_API_URL: https://api-neur-cxsiamp.xdr.eu.paloaltonetworks.com
+  AWS_REGION: eu-west-3
+  ECR_REPOSITORY: chrysoula-brokenbank
+
+jobs:
+  cortex-scan:
     runs-on: ubuntu-latest
-    env:
-      # Ensure these match your specific ECR and Region
-      AWS_REGION: eu-west-3
-      ECR_REPOSITORY: chrysoula-brokenbank
-      
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    # --- 1. Environment Setup (Producer Fixes #1, #4) ---
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 22
+      # --- 1. Environment Setup (Node & Java) ---
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-    - name: Set up Java (Required for Secrets Scanner)
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Set up Java (Required for Secrets Scanner)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-    # --- 2. Download and Prepare CLI (Producer Fixes #2, #3, #5) ---
-    - name: Download and Prepare cortexcli
-      run: |
-        # Download CLI
-        crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
-          -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
-          -H "Authorization: ${CORTEX_API_KEY}")
-        crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
-        curl -o cortexcli $crtx_url
-        chmod +x cortexcli
-        
-        # Prepare execution environment
-        mkdir -p $HOME/.cortexcli
-        chmod -R 777 $HOME/.cortexcli
-        mkdir -p ${{ github.workspace }}/tmp
+      # --- 2. Download and Prepare CLI ---
+      - name: Download and Prepare cortexcli
+        run: |
+          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+            -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+            -H "Authorization: ${CORTEX_API_KEY}")
+          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+          curl -o cortexcli $crtx_url
+          chmod +x cortexcli
+          
+          # Prepare execution environment
+          mkdir -p $HOME/.cortexcli
+          chmod -R 777 $HOME/.cortexcli
+          mkdir -p ${{ github.workspace }}/tmp
 
-    # --- 3. Build Image (Required before local scan) ---
-    - name: Build Docker Image
-      run: |
-        docker build -t ${{ env.ECR_REPOSITORY }}:latest .
+      # --- 3. Build Image (Required before local scan) ---
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ env.ECR_REPOSITORY }}:latest .
 
-    # --- 4. Run Scans (Code & Image) ---
-    - name: Run Cortex CLI Code Scan
-      run: |
-        ./cortexcli \
-          --api-base-url "${CORTEX_API_URL}" \
-          --api-key "${CORTEX_API_KEY}" \
-          --api-key-id "${CORTEX_API_KEY_ID}" \
-          code scan \
-          --directory "${{github.workspace}}" \
-          --repo-id "${{github.repository}}" \
-          --branch "${{github.ref_name}}" \
-          --source "GITHUB_ACTIONS" \
-          --create-repo-if-missing
+      # --- 4. Run Scans (Code & Image) ---
+      - name: Run Cortex CLI Code Scan
+        run: |
+          ./cortexcli \
+            --api-base-url "${CORTEX_API_URL}" \
+            --api-key "${CORTEX_API_KEY}" \
+            --api-key-id "${CORTEX_API_KEY_ID}" \
+            code scan \
+            --directory "${{ github.workspace }}" \
+            --repo-id "${{ github.repository }}" \
+            --branch "${{ github.ref_name }}" \
+            --source "GITHUB_ACTIONS" \
+            --create-repo-if-missing
 
-    - name: Run Cortex CLI Image Scan
-      run: |
-        # Set TMPDIR for the scanner execution
-        export TMPDIR=${{ github.workspace }}/tmp
-        
-        ./cortexcli \
-          --api-base-url "${CORTEX_API_URL}" \
-          --api-key "${CORTEX_API_KEY}" \
-          --api-key-id "${CORTEX_API_KEY_ID}" \
-          image scan \
-          --soft-fail \
-          "${{ env.ECR_REPOSITORY }}:latest"
+      - name: Run Cortex CLI Image Scan
+        run: |
+          # Set TMPDIR for the scanner execution
+          export TMPDIR=${{ github.workspace }}/tmp
+          
+          ./cortexcli \
+            --api-base-url "${CORTEX_API_URL}" \
+            --api-key "${CORTEX_API_KEY}" \
+            --api-key-id "${CORTEX_API_KEY_ID}" \
+            image scan \
+            --soft-fail \
+            "${{ env.ECR_REPOSITORY }}:latest"
