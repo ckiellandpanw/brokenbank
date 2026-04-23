@@ -66,17 +66,20 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build -t ${{ env.ECR_REPOSITORY }}:latest .
+          docker build -t chrysoula-brokenbank:latest .
 
       - name: Save image as archive
         run: |
-          docker save -o /tmp/chrysoula-brokenbank.tar "${{ env.ECR_REPOSITORY }}:latest"
+          docker save chrysoula-brokenbank:latest -o image.tar
 
       - name: Run Cortex CLI Image Scan
         run: |
           sudo -E ./cortexcli \
-            --api-base-url "${CORTEX_API_URL}" \
-            --api-key "${CORTEX_API_KEY}" \
-            --api-key-id "${CORTEX_API_KEY_ID}" \
-            image scan \
-            --archive /tmp/chrysoula-brokenbank.tar
+          --api-base-url "${CORTEX_API_URL}" \
+          --api-key "${CORTEX_API_KEY}" \
+          --api-key-id "${CORTEX_API_KEY_ID}" \
+          --support \
+          image scan \
+          --archive \
+          --name "chrysoula-brokenbank:latest" \
+          image.tar
