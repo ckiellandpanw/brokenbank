@@ -49,12 +49,7 @@ jobs:
           chmod -R 777 $HOME/.cortexcli
           mkdir -p ${{ github.workspace }}/tmp
 
-      # --- 3. Build Image (Required before local scan) ---
-      - name: Build Docker Image
-        run: |
-          docker build -t ${{ env.ECR_REPOSITORY }}:latest .
 
-      # --- 4. Run Scans (Code & Image) ---
       - name: Run Cortex CLI Code Scan
         run: |
           ./cortexcli \
@@ -68,17 +63,20 @@ jobs:
             --source "GITHUB_ACTIONS" \
             --create-repo-if-missing
       
-      - name: Debug local image
+
+      - name: Build Docker Image
         run: |
-          docker images
-          docker inspect "${{ env.ECR_REPOSITORY }}:latest" >/dev/null
+          docker build -t ${{ env.ECR_REPOSITORY }}:latest .
+
+      - name: Save image as archive
+        run: |
+          docker save -o /tmp/chrysoula-brokenbank.tar "${{ env.ECR_REPOSITORY }}:latest"
 
       - name: Run Cortex CLI Image Scan
         run: |
-          
           sudo -E ./cortexcli \
             --api-base-url "${CORTEX_API_URL}" \
             --api-key "${CORTEX_API_KEY}" \
             --api-key-id "${CORTEX_API_KEY_ID}" \
             image scan \
-            "${{ env.ECR_REPOSITORY }}:latest"
+            --archive /tmp/chrysoula-brokenbank.tar
