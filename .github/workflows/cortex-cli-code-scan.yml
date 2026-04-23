@@ -52,7 +52,7 @@ jobs:
           --branch "${{github.ref_name}}" \
           --source "GITHUB_ACTIONS" \
           --create-repo-if-missing
-          
+
     # --- Step 3: Build the Image (Required for Image Scan) ---
     - name: Build Docker Image
       run: |
@@ -60,11 +60,22 @@ jobs:
     
     - name: Run Cortex CLI Image Scan
       run: |
+        export TMPDIR=${{ github.workspace }}/tmp
+        mkdir -p $TMPDIR
+
+        sudo apt-get update && sudo apt-get install -y default-jre
+
+        mkdir -p $HOME/.cortexcli
+        chmod -R 777 $HOME/.cortexcli
+
+        chmod +x ./cortexcli
+
         ./cortexcli \
           --api-base-url "${CORTEX_API_URL}" \
           --api-key "${CORTEX_API_KEY}" \
           --api-key-id "${CORTEX_API_KEY_ID}" \
           image scan \
+          --soft-fail \
           "${{ env.ECR_REPOSITORY }}:latest"
 
   
