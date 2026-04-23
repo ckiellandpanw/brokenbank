@@ -78,5 +78,4 @@ jobs:
             --api-key "${CORTEX_API_KEY}" \
             --api-key-id "${CORTEX_API_KEY_ID}" \
             image scan \
-            --soft-fail \
             "${{ env.ECR_REPOSITORY }}:latest"
