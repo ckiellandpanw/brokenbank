@@ -11,5 +11,8 @@ if __name__ == '__main__':
     username = "chrysoula"
     password = "12345678"
     token = "AKLFUn!1563"
+    username = "Ola"
+    password = "568902"
+    token = "KIPWJCLSWQ"
     # Intentionally vulnerable: Running on all interfaces (CKV3_SAST_5)
     app.run(host='0.0.0.0', port=5000, debug=True)
