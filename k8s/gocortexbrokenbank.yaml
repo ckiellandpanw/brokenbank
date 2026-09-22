@@ -56,6 +56,24 @@ spec:
               containerPort: 7777
               hostPort: 7777
               protocol: TCP
+
+            # OTel Prometheus scrape endpoint (poll-based metrics)
+            - name: metrics
+              containerPort: 9464
+              hostPort: 9464
+              protocol: TCP
+
+            # sshd - leaked deployment key / weak root password login
+            - name: ssh
+              containerPort: 22
+              hostPort: 2222
+              protocol: TCP
+
+            # Live Transaction Ticker (WebSocket)
+            - name: ticker
+              containerPort: 6666
+              hostPort: 6666
+              protocol: TCP
           env:
             - name: SESSION_SECRET
               value: "hardcoded-docker-secret-key"

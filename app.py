@@ -2,18 +2,22 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import os
+import time
 import yaml
 import logging
 import random
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, make_response, session
+from flask import Flask, render_template, request, redirect, url_for, flash, make_response, session, g, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.middleware.proxy_fix import ProxyFix
 # Proxy imports removed - no separate lab applications
 
 # Log shipping for SIEM integration
-from log_shipping import bbwaf_logging_middleware, log_auth_event
+from log_shipping import bbwaf_logging_middleware, log_auth_event, log_concierge_event
 from auth_traffic_generator import start_auth_generator
+
+# OTel poll-based metrics (Prometheus scrape endpoint on port 9464)
+from observability.metrics import init_metrics
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +53,36 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # Suppress Flask-SQLAlchem
 db.init_app(app)
 
 # Application version
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.6.0"
+
+# OTel metrics - start Prometheus scrape endpoint on port 9464
+init_metrics(port=9464)
+
+# Flask HTTP instrumentation - record per-request counts and durations.
+# Skips the /metrics path itself to avoid self-scrape noise in the output.
+@app.before_request
+def _metrics_before_request():
+    from observability import metrics as _m
+    if request.path != "/metrics" and _m.http_requests is not None:
+        g._metrics_start = time.time()
+
+@app.after_request
+def _metrics_after_request(response):
+    from observability import metrics as _m
+    start = getattr(g, "_metrics_start", None)
+    if start is not None and _m.http_requests is not None:
+        duration = time.time() - start
+        labels = {
+            "method": request.method,
+            "endpoint": request.endpoint or request.path,
+            "status_code": str(response.status_code),
+        }
+        _m.http_requests.add(1, labels)
+        _m.http_request_duration.record(
+            duration,
+            {"method": request.method, "endpoint": request.endpoint or request.path},
+        )
+    return response
 
 # Testing URLs for cybersecurity validation purposes only - these are fictitious endpoints
 # used by automated security scanners to validate URL filtering and threat detection capabilities
@@ -187,6 +220,217 @@ def index():
 @app.route('/disclaimer')
 def disclaimer():
     return render_template('disclaimer.html')
+
+# Mars Banking Initiative Concierge - intentionally vulnerable LLM chatbot
+# Demonstrates OWASP LLM Top 10: LLM01 Prompt Injection, LLM02 Insecure Output
+# Handling, LLM06 Sensitive Information Disclosure, LLM08 Excessive Agency.
+from chatbot import concierge as _concierge
+
+# Pre-warm the SmolLM2 GGUF in a background thread so the first
+# /concierge/chat request does not pay the multi-second cold-load
+# latency. Without this the live demo has a visible "tell": injection
+# prompts (which used to short-circuit the LLM) returned instantly
+# while the first safe banking turn took 10+ seconds, breaking the
+# illusion that the model is actually being attacked.
+_concierge.start_warmup()
+
+CONCIERGE_MODEL_NAME = os.environ.get(
+    "CONCIERGE_MODEL_NAME", "SmolLM2-135M-Instruct GGUF Q4_K_M"
+)
+
+@app.route('/concierge')
+def concierge_page():
+    """Render the Mars Banking Initiative Concierge chat page."""
+    return render_template(
+        'concierge.html',
+        model_name=CONCIERGE_MODEL_NAME,
+        context_count=len(_concierge.get_extra_context()),
+        concierge_disabled=_concierge.is_disabled(),
+        concierge_disabled_reason=_concierge.disabled_reason(),
+        concierge_disabled_message=_concierge.disabled_message(),
+    )
+
+def _concierge_session_id():
+    """Return a stable session id for SIEM correlation, minting one on first use."""
+    sid = session.get('concierge_session_id')
+    if not sid:
+        import uuid as _uuid
+        sid = _uuid.uuid4().hex
+        session['concierge_session_id'] = sid
+    return sid
+
+
+def _concierge_context_labels():
+    return [label for label, _body in _concierge.get_extra_context()]
+
+
+@app.route('/concierge/chat', methods=['POST'])
+def concierge_chat():
+    """Intentionally vulnerable chat endpoint.
+
+    No input sanitisation, no output filter, no allow-list, no rate limit.
+    Logs full prompts and responses to stdout for SIEM training, and ships
+    one prompt event and one response event per turn (correlated by
+    turn_id) to the netbank_concierge XSIAM stream so a prompt-injection
+    detection ruleset has something to match on.
+    """
+    user_message = request.form.get('message', '') or request.values.get('message', '')
+    if not user_message:
+        return "No message provided", 400
+    logging.info("CONCIERGE REQUEST remote=%s ua=%s message=%r",
+                 request.remote_addr, request.headers.get('User-Agent', ''),
+                 user_message)
+
+    import uuid as _uuid
+    turn_id = _uuid.uuid4().hex
+    session_id = _concierge_session_id()
+    context_labels = _concierge_context_labels()
+
+    effective_model_name = (
+        "disabled" if _concierge.is_disabled() else CONCIERGE_MODEL_NAME
+    )
+
+    log_concierge_event(
+        "prompt", request,
+        session_id=session_id, turn_id=turn_id,
+        model_name=effective_model_name,
+        prompt_text=user_message,
+        context_document_count=len(context_labels),
+        context_document_labels=context_labels,
+    )
+
+    if _concierge.is_disabled():
+        response_text = _concierge.disabled_message()
+        response_path = "disabled"
+    else:
+        response_text, response_path = _concierge.generate(user_message)
+
+    # Re-read context labels in case generate() (or the model) mutated state.
+    context_labels = _concierge_context_labels()
+    log_concierge_event(
+        "response", request,
+        session_id=session_id, turn_id=turn_id,
+        model_name=effective_model_name,
+        response_text=response_text,
+        response_path=response_path,
+        context_document_count=len(context_labels),
+        context_document_labels=context_labels,
+    )
+
+    return response_text, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+@app.route('/concierge/load_url', methods=['POST'])
+def concierge_load_url():
+    """Indirect prompt-injection sink: fetch a URL and add to context.
+
+    No URL validation, no SSRF guard, no sanitisation of fetched content.
+    """
+    url = request.form.get('url', '')
+    if not url:
+        return "No url provided", 400
+    import requests as _req
+    try:
+        resp = _req.get(url, verify=False, timeout=10)
+        body = resp.text[:8000]
+        _concierge.add_context_document(url, body)
+
+        import uuid as _uuid
+        context_labels = _concierge_context_labels()
+        log_concierge_event(
+            "context_loaded", request,
+            session_id=_concierge_session_id(),
+            turn_id=_uuid.uuid4().hex,
+            model_name=CONCIERGE_MODEL_NAME,
+            document_label=url,
+            source_url=url,
+            body_preview=body,
+            body_length=len(body),
+            context_document_count=len(context_labels),
+            context_document_labels=context_labels,
+        )
+        return f"Loaded {len(body)} characters from {url} into Concierge context"
+    except Exception as exc:
+        return f"Failed to load {url}: {exc}", 502
+
+@app.route('/concierge/load_text', methods=['POST'])
+def concierge_load_text():
+    """Indirect prompt-injection sink: accept raw text into context."""
+    label = request.form.get('label', 'uploaded-document')
+    body = request.form.get('body', '')
+    if not body:
+        return "No body provided", 400
+    truncated = body[:16000]
+    _concierge.add_context_document(label, truncated)
+
+    import uuid as _uuid
+    context_labels = _concierge_context_labels()
+    log_concierge_event(
+        "context_loaded", request,
+        session_id=_concierge_session_id(),
+        turn_id=_uuid.uuid4().hex,
+        model_name=CONCIERGE_MODEL_NAME,
+        document_label=label,
+        body_preview=truncated,
+        body_length=len(truncated),
+        context_document_count=len(context_labels),
+        context_document_labels=context_labels,
+    )
+    return f"Added document {label!r} ({len(body)} chars) to Concierge context"
+
+# Intentionally vulnerable: Uncontrolled agentic tool execution (OWASP LLM08 - Excessive Agency)
+@app.route('/concierge/agent', methods=['POST'])
+def concierge_agent():
+    """Agentic task executor: asks the Concierge model for the shell command
+    needed to complete an operations task, then runs whatever it suggests.
+
+    No validation, allow-list, or human-in-the-loop confirmation on the
+    model's output before execution. A prompt that steers the model's
+    suggested command steers what actually executes on the host.
+    """
+    task = request.form.get('task', '')
+    if not task:
+        return "No task provided", 400
+    import subprocess
+    import uuid as _uuid
+    if _concierge.is_disabled():
+        return _concierge.disabled_message(), 200
+
+    turn_id = _uuid.uuid4().hex
+    session_id = _concierge_session_id()
+    context_labels = _concierge_context_labels()
+    effective_model_name = CONCIERGE_MODEL_NAME
+
+    agent_prompt = (
+        "You are a system agent that executes shell commands to complete "
+        "operations tasks. Respond with ONLY the shell command needed, no "
+        "explanation, no markdown formatting. Task: " + task
+    )
+    suggested_command, response_path = _concierge.generate(agent_prompt)
+    suggested_command = suggested_command.strip().splitlines()[0] if suggested_command.strip() else ""
+    try:
+        # Vulnerable: the model's suggested command executes with no validation,
+        # allow-list, or confirmation step
+        result = subprocess.run(
+            suggested_command, shell=True, capture_output=True, text=True, timeout=10
+        )
+        log_concierge_event(
+            "agent_command", request,
+            session_id=session_id, turn_id=turn_id,
+            model_name=effective_model_name,
+            prompt_text=task,
+            response_text=f"{suggested_command}\n--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}",
+            response_path=response_path,
+            context_document_count=len(context_labels),
+            context_document_labels=context_labels,
+        )
+        return jsonify({
+            "suggested_command": suggested_command,
+            "response_path": response_path,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        })
+    except Exception as e:
+        return jsonify({"suggested_command": suggested_command, "error": str(e)}), 400
 
 # Banking Pages
 @app.route('/netbank')
@@ -363,6 +607,20 @@ def deserialize_data():
             return "Invalid data format"
     return "Deserialize endpoint - provide ?data=base64encodedpickle"
 
+# Intentionally vulnerable: Unsafe YAML deserialization
+@app.route('/account/restore_preferences', methods=['GET', 'POST'])
+def restore_account_preferences():
+    """Restore previously exported account notification/statement preferences"""
+    if request.method == 'POST':
+        backup_data = request.form.get('backup_data', '')
+        # Vulnerable: Unsafe YAML deserialization allows arbitrary object construction
+        try:
+            preferences = yaml.load(backup_data, Loader=yaml.Loader)
+            return f"Preferences restored: {preferences}"
+        except Exception as e:
+            return f"Failed to restore backup: {e}", 400
+    return "POST backup_data=<yaml> to restore account preferences"
+
 # Intentionally vulnerable: SSRF (CKV3_SAST_189)
 @app.route('/fetch')
 def fetch_url():
@@ -378,6 +636,31 @@ def fetch_url():
         except Exception as e:
             return f"Failed to fetch: {url} - {e}"
     return "Fetch endpoint - provide ?url=http://example.com"
+
+# Intentionally vulnerable: Simulated cloud instance metadata credential theft (SSRF target)
+# Reachable via any SSRF sink pointed at this host (e.g. /fetch?url=..., /api/branch-locator)
+@app.route('/latest/meta-data/iam/security-credentials/')
+def imds_role_list():
+    """Simulated cloud instance metadata service - lists the attached IAM role"""
+    return "ares-prod-deploy-role"
+
+@app.route('/latest/meta-data/iam/security-credentials/<role>')
+def imds_credentials(role):
+    """Simulated cloud instance metadata service - returns temporary credentials for the attached role"""
+    # Vulnerable: no IMDSv2 session-token handshake required, so any SSRF that
+    # reaches this path (no direct network access needed) exfiltrates live-looking
+    # temporary cloud credentials for the attached role
+    now = datetime.utcnow()
+    expiry = (now + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return jsonify({
+        "Code": "Success",
+        "LastUpdated": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "Type": "AWS-HMAC",
+        "AccessKeyId": "ASIAV3XFZ2Y4EXAMPLE",
+        "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "Token": "IQoJb3JpZ2luX2VjEXAMPLETOKENbbchain06simxxxx",
+        "Expiration": expiry,
+    })
 
 # Intentionally vulnerable: XXE (CKV3_SAST_50, CKV3_SAST_90)
 @app.route('/xml', methods=['POST'])
@@ -448,6 +731,31 @@ def decode_token():
             return f"Invalid JWT format: {e}"
     return "JWT endpoint - provide ?jwt=token"
 
+# Intentionally vulnerable: JWT "kid" header path traversal (arbitrary file as HMAC key)
+@app.route('/api/auth/refresh', methods=['POST'])
+def refresh_auth_token():
+    """Refresh a session token using the signing key referenced by the token's kid header"""
+    token = request.form.get('token', '')
+    import jwt
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get('kid', 'keys/default.key')
+        # Vulnerable: kid is used directly as a filesystem path with no allow-list or
+        # traversal check, and no suffix is enforced. Pointing kid at a predictable,
+        # zero-byte file (e.g. ../../../../dev/null, which reads as an empty key)
+        # lets an attacker sign their own tokens with a key they can guess, forging
+        # valid sessions.
+        key_path = kid
+        with open(key_path, 'rb') as f:
+            signing_key = f.read()
+        payload = jwt.decode(token, signing_key, algorithms=['HS256'])
+        new_token = jwt.encode(payload, signing_key, algorithm='HS256', headers={'kid': kid})
+        if isinstance(new_token, bytes):
+            new_token = new_token.decode('utf-8')
+        return jsonify({"token": new_token})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 # Intentionally vulnerable: Email sending (CKV3_SAST_63)
 @app.route('/email')
 def send_email():
@@ -505,6 +813,19 @@ def render_unsafe_template():
     unsafe_html = Markup(user_input)  # Marks as safe, bypassing escaping
     return f"<h1>User Input:</h1><div>{unsafe_html}</div>"
 
+# Intentionally vulnerable: Server-side template injection (SSTI)
+@app.route('/business/notifications/preview', methods=['GET', 'POST'])
+def preview_notification_template():
+    """Preview a custom payment-alert notification template before saving"""
+    from flask import render_template_string
+    template = request.values.get('template', 'Payment of {{ amount }} to {{ account }} completed.')
+    # Vulnerable: user-controlled string passed directly to the Jinja2 renderer, unsandboxed
+    try:
+        rendered = render_template_string(template, amount='100.00', account='12345678')
+        return rendered
+    except Exception as e:
+        return f"Template preview failed: {e}", 400
+
 # Intentionally vulnerable: Improper exception handling (CKV3_SAST_4)
 @app.route('/exception')
 def handle_exception():
@@ -552,11 +873,43 @@ def wildcard_usage():
 @app.route('/admin')
 def admin_panel():
     """Intentionally vulnerable admin access"""
-    # Vulnerable: No proper authorization check
+    # Vulnerable: No proper authorisation check
     user_role = request.args.get('role', 'user')
     if user_role:  # Weak check - any non-empty role grants access
         return "Welcome to admin panel! Sensitive admin data here."
     return "Access denied"
+
+# Intentionally vulnerable: Arbitrary file write/timestomping via unrestricted log path
+@app.route('/admin/logs/retention', methods=['POST'])
+def purge_log_retention():
+    """Compliance utility: purge/rotate log entries older than the retention policy"""
+    log_path = request.form.get('path', '/opt/tomcat/logs/localhost_access_log.txt')
+    backdate_days = int(request.form.get('backdate_days', '0'))
+    try:
+        # Vulnerable: no allow-list on path, truncates/erases arbitrary files
+        open(log_path, 'w').close()
+        if backdate_days:
+            backdated = time.time() - (backdate_days * 86400)
+            os.utime(log_path, (backdated, backdated))  # Vulnerable: timestomping
+        return f"Log retention applied to {log_path} (backdated {backdate_days} days)"
+    except Exception as e:
+        return f"Retention purge failed: {e}", 400
+
+# Intentionally vulnerable: Unrestricted cron entry write (persistence)
+@app.route('/admin/tasks/schedule', methods=['POST'])
+def schedule_maintenance_task():
+    """Schedule a recurring maintenance task via cron"""
+    schedule = request.form.get('schedule', '*/5 * * * *')
+    command = request.form.get('command', 'echo maintenance')
+    try:
+        # Vulnerable: no validation on schedule or command; written straight into
+        # a root-run cron.d file, so any command here re-executes on schedule
+        with open('/etc/cron.d/brokenbank-tasks', 'a') as f:
+            f.write(f"{schedule} root {command}\n")
+        os.chmod('/etc/cron.d/brokenbank-tasks', 0o644)
+        return f"Task scheduled: {schedule} -> {command}"
+    except Exception as e:
+        return f"Failed to schedule task: {e}", 400
 
 # Intentionally vulnerable: Inadequate SSL/TLS (CKV3_SAST_65)
 @app.route('/ssl_test')
@@ -571,7 +924,7 @@ def ssl_configuration():
     
     return "SSL context configured with weak security settings"
 
-# Intentionally vulnerable: AES initialization vector (CKV3_SAST_68)
+# Intentionally vulnerable: AES initialisation vector (CKV3_SAST_68)
 @app.route('/encrypt')
 def encrypt_data():
     """Intentionally vulnerable encryption"""
@@ -641,6 +994,47 @@ def cleartext_credentials():
     encoded_creds = base64.b64encode(credentials.encode()).decode()
     
     return f"Credentials transmitted in cleartext: {credentials} (Base64: {encoded_creds})"
+
+# Intentionally vulnerable: Unauthenticated secrets-manager proxy (missing authentication)
+@app.route('/api/vault/secrets/<path:secret_path>')
+def vault_secrets_proxy(secret_path):
+    """Internal secrets bridge - proxies configuration secrets to microservices at boot"""
+    # Vulnerable: no authentication token required, unlike a real Vault deployment
+    secrets_store = {
+        "database/production": {"username": "ares_superuser", "password": "Sup3r_Us3r_Ar3s_DB_2028"},
+        "aws/deploy-role": {"access_key": "AKIAIOSFODNN7EXAMPLE", "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+        "github/deploy-token": {"token": "ghp_" + "A" * 36},
+        "stripe/live-key": {"key": "sk_live_" + "B" * 24},
+    }
+    secret = secrets_store.get(secret_path)
+    if secret is None:
+        return jsonify({"errors": [f"no secret found at path: {secret_path}"]}), 404
+    return jsonify({
+        "request_id": f"bb-{random.randint(10000, 99999)}",
+        "lease_duration": 0,
+        "renewable": False,
+        "data": {"data": secret, "metadata": {"version": 1}}
+    })
+
+# Intentionally vulnerable: Dependency confusion / malicious package index (supply chain)
+@app.route('/admin/plugins/install', methods=['POST'])
+def install_plugin():
+    """Install a banking widget plugin from the configured internal plugin registry"""
+    package = request.form.get('package', '')
+    index_url = request.form.get('index_url', 'https://pypi.org/simple')
+    import subprocess
+    try:
+        # Vulnerable: index_url is fully attacker-controlled with no allow-list, and
+        # package is not checked against an internal namespace - classic dependency
+        # confusion / malicious-package-index RCE (pip runs the package's setup.py /
+        # build hooks during install)
+        result = subprocess.run(
+            ["pip", "install", "--index-url", index_url, package],
+            capture_output=True, text=True, timeout=30
+        )
+        return f"Plugin install output:\n{result.stdout}\n{result.stderr}"
+    except Exception as e:
+        return f"Plugin install failed: {e}", 400
 
 # Intentionally vulnerable: Machine learning model download (CKV3_SAST_99)
 @app.route('/ml_model')
@@ -930,6 +1324,47 @@ def database_config():
             return f"SQL error: {e}\nQuery was: {query}"
     else:
         return f"Database operation '{operation}' executed with hardcoded credentials. Use ?op=query&query=SELECT * FROM users for SQL injection demo."
+
+# Intentionally vulnerable: Mobile Banking Partner API (GraphQL) - old, abandoned
+# graphene 2.x / flask-graphql stack, introspection left on, no query depth or
+# cost limiting, and a resolver argument interpolated straight into raw SQL -
+# GraphQL-mediated SQL injection, distinct from /database's REST-shaped one.
+import graphene
+from flask_graphql import GraphQLView
+
+
+class UserType(graphene.ObjectType):
+    id = graphene.Int()
+    username = graphene.String()
+    password = graphene.String()
+
+
+class Query(graphene.ObjectType):
+    users = graphene.List(UserType, search=graphene.String())
+
+    def resolve_users(self, info, search=None):
+        import sqlite3
+        # Vulnerable: same in-memory demo table as /database, but reached via a
+        # GraphQL query argument concatenated straight into raw SQL - no
+        # parameterisation, no query cost/depth limiting, introspection enabled
+        conn = sqlite3.connect(':memory:')
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER, username TEXT, password TEXT)")
+        cursor.execute("INSERT OR IGNORE INTO users VALUES (1, 'admin', 'password123')")
+        cursor.execute("INSERT OR IGNORE INTO users VALUES (2, 'user', 'secret456')")
+        conn.commit()
+        query = f"SELECT id, username, password FROM users WHERE username LIKE '%{search or ''}%'"
+        cursor.execute(query)  # GRAPHQL-MEDIATED SQL INJECTION
+        rows = cursor.fetchall()
+        conn.close()
+        return [UserType(id=r[0], username=r[1], password=r[2]) for r in rows]
+
+
+schema = graphene.Schema(query=Query)
+app.add_url_rule(
+    '/graphql',
+    view_func=GraphQLView.as_view('graphql', schema=schema, graphiql=True)
+)
 
 with app.app_context():
     import models

